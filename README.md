@@ -1,5 +1,7 @@
 # SAGA
-The official implementation of SAGA (Segment Any 3D GAussians). The paper is at [this url](https://jumpat.github.io/SAGA/SAGA_paper.pdf). Please refer to our [project page](https://jumpat.github.io/SAGA/) for more information. The code will be released soon.
+> Note: This repository is still under construction.
+
+The official implementation of SAGA (Segment Any 3D GAussians). The paper is at [this url](https://jumpat.github.io/SAGA/SAGA_paper.pdf). Please refer to our [project page](https://jumpat.github.io/SAGA/) for more information. 
 <br>
 <br>
 <div align=center>
@@ -30,7 +32,6 @@ conda activate gaussian_splatting
 ```
 
 
-> **Note:** The code is tested on Ubuntu 18.04 with Python 3.7 and PyTorch 1.7.1.
 
 ## Citation
 If you find this project helpful for your research, please consider citing the report and giving a ⭐.
