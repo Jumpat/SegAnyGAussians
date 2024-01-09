@@ -11,6 +11,7 @@ dependencies:
   - pytorch=1.12.1
   - torchaudio=0.12.1
   - torchvision=0.13.1
+  - pytorch3d=0.7.1
   - tqdm
   - pip:
     - submodules/diff-gaussian-rasterization
