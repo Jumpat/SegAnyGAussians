@@ -12,6 +12,9 @@ dependencies:
   - torchaudio=0.12.1
   - torchvision=0.13.1
   - tqdm
+  - hdbscan
   - pip:
     - submodules/diff-gaussian-rasterization
+    - submodules/diff-gaussian-rasterization_contrastive_f
     - submodules/simple-knn
+    - third_party/segment-anything
