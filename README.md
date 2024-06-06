@@ -3,7 +3,7 @@
 The official implementation of [SAGA (Segment Any 3D GAussians)](https://arxiv.org/abs/2312.00860). 
 <!-- Please refer to our [project page](https://jumpat.github.io/SAGA/) for more information.  -->
 <br>
-<br>
+<!-- <br> -->
 <div align=center>
 <img src="./assets/saga-teaser.png" width="700px">
 </div>
