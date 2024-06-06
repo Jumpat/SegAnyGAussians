@@ -90,7 +90,7 @@ Temporarily, open-vocabulary segmentation is only implemented in the jupyter not
 
 
 ## Rendering
-After saving segmentation results in the interactive GUI or running the scripts in prompt_segmenting.ipynb, the bitmap of the Gaussians will be saved in ./segmentation_res/<name>.pt . To render the segmentation results on training views (get the segmented object by removing the background), run the following command:
+After saving segmentation results in the interactive GUI or running the scripts in prompt_segmenting.ipynb, the bitmap of the Gaussians will be saved in ./segmentation_res/\<name>.pt (you can set the name by yourself). To render the segmentation results on training views (get the segmented object by removing the background), run the following command:
 ```bash
 python render.py -m <path to the pre-trained 3DGS model> --precomputed_mask <path to the segmentation results> --target scene --segment
 ```
@@ -117,4 +117,4 @@ If you find this project helpful for your research, please consider citing the r
 ```
 
 ## Acknowledgement
-The implementation of saga refers to [GARField](https://github.com/chungmin99/garfield.git), [OmniSeg3D](https://github.com/OceanYing/OmniSeg3D-GS), [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting), we sincerely thank them for their contributions to the community.
+The implementation of saga refers to [GARField](https://github.com/chungmin99/garfield.git), [OmniSeg3D](https://github.com/OceanYing/OmniSeg3D-GS), [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting), and we sincerely thank them for their contributions to the community.

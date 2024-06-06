@@ -252,6 +252,8 @@ class GaussianSplattingGUI:
         self.render_mode_similarity = False
         self.render_mode_pca = False
         self.render_mode_cluster = False
+
+        self.save_flag = False
     def __del__(self):
         dpg.destroy_context()
 
@@ -317,9 +319,10 @@ class GaussianSplattingGUI:
             self.clear_edit = True
         def roll_back():
             self.roll_back = True
-        @torch.no_grad()
         def callback_segment3d():
             self.segment3d_flag = True
+        def callback_save():
+            self.save_flag = True
         def callback_reload():
             self.reload_flag = True
         def callback_cluster():
@@ -366,6 +369,8 @@ class GaussianSplattingGUI:
             dpg.add_button(label="segment3d", callback=callback_segment3d, user_data="Some Data")
             dpg.add_button(label="roll_back", callback=roll_back, user_data="Some Data")
             dpg.add_button(label="clear", callback=clear_edit, user_data="Some Data")
+            dpg.add_input_text("save as", default_value="precomputed_mask", tag="save_name")
+            dpg.add_button(label="save", callback=callback_save, user_data="Some Data")
 
             dpg.add_button(label="cluster3d", callback=callback_cluster, user_data="Some Data")
             dpg.add_button(label="reshuffle_cluster_color", callback=callback_reshuffle_color, user_data="Some Data")
@@ -670,7 +675,7 @@ class GaussianSplattingGUI:
 
                 score_pts = scale_gated_feat_pts @ self.chosen_feature
                 score_pts = (score_pts + 1.0) / 2
-                score_pts_binary = (score_pts > dpg.get_value('_ScoreThres')).sum(1) > 0
+                self.score_pts_binary = (score_pts > dpg.get_value('_ScoreThres')).sum(1) > 0
 
                 # save_path = "./debug_robot_{:0>3d}.ply".format(self.object_seg_id)
                 # try:
@@ -678,8 +683,14 @@ class GaussianSplattingGUI:
                 #     self.engine['feature'].roll_back()
                 # except:
                 #     pass
-                self.engine['scene'].segment(score_pts_binary)
-                self.engine['feature'].segment(score_pts_binary)
+                self.engine['scene'].segment(self.score_pts_binary)
+                self.engine['feature'].segment(self.score_pts_binary)
+
+            if self.save_flag:
+                self.save_flag = False
+                os.makedirs("./segmentation_res", exist_ok=True)
+                torch.save(self.score_pts_binary, f"./segmentation_res/{dpg.get_value('save_name')}.pt")
+                
 
         self.render_buffer = None
         render_num = 0
