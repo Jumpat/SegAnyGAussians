@@ -5,6 +5,7 @@ The official implementation of [SAGA (Segment Any 3D GAussians)](https://arxiv.o
 <br>
 <div align=center>
 <img src="./assets/teaser.png" width="500px">
+</div>
 
 # Installation
 The installation of SAGA is similar to [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting).
