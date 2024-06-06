@@ -4,7 +4,7 @@ The official implementation of [SAGA (Segment Any 3D GAussians)](https://arxiv.o
 <br>
 <br>
 <div align=center>
-<img src="./assets/saga-teaser.pdf" width="500px">
+<img src="./assets/saga-teaser.png" width="500px">
 </div>
 
 # Installation
