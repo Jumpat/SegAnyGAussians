@@ -30,8 +30,12 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(gts_path, exist_ok=True)
     makedirs(mask_path, exist_ok=True)
 
-    if target == 'contrastive_feature':
+    if target == 'feature':
         render_func = render_contrastive_feature
+    elif target == 'contrastive_feature':
+        render_func = render_contrastive_feature
+    elif target == 'xyz':
+        render_func = render
     else:
         render_func = render
 
@@ -43,7 +47,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         rendering = res["render"]
         
         gt = view.original_image[0:3, :, :]
+        # print(rendering.shape, mask.shape, gt.shape, "rendering.shape, mask.shape, gt.shape")
 
+        # print("mask render time", time.time() - start_time)
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
         if target == 'seg':
             mask = res["mask"]
@@ -51,10 +57,12 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             mask[mask != 0] = 1
             mask = mask[0, :, :]
             torchvision.utils.save_image(mask, os.path.join(mask_path, '{0:05d}'.format(idx) + ".png"))
-        if target == 'seg' or target == 'scene':
+        if target == 'seg' or target == 'scene' or target == 'coarse_seg_everything':
             torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         elif 'feature' in target:
             torch.save(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".pt"))
+        elif target == 'xyz':
+            torch.save(rendering, os.path.join(render_path, 'xyz_{0:05d}'.format(idx) + ".pt"))
         
         
         
@@ -62,7 +70,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, segment : bool = False, target = 'scene', idx = 0, precomputed_mask = None):
     dataset.need_features = dataset.need_masks = False
     if segment:
-        assert target == 'seg' or precomputed_mask is not None and "Segmentation only works with target 'seg' or precomputed_mask!"
+        assert target == 'seg' or target == 'coarse_seg_everything' or precomputed_mask is not None and "Segmentation only works with target seg!"
     gaussians, feature_gaussians = None, None
     with torch.no_grad():
         if precomputed_mask is not None:
@@ -75,17 +83,26 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
                 precomputed_mask[precomputed_mask != 1] = 0
                 precomputed_mask = precomputed_mask.bool()
 
-        if target == 'scene' or target == 'seg':
+        if target == 'scene' or target == 'seg' or target == 'coarse_seg_everything' or target == 'xyz':
             gaussians = GaussianModel(dataset.sh_degree)
-        if target == 'contrastive_feature':
+        if target == 'feature' or target == 'coarse_seg_everything' or target == 'contrastive_feature':
             feature_gaussians = FeatureGaussianModel(dataset.feature_dim)
 
-        scene = Scene(dataset, gaussians, feature_gaussians, load_iteration=iteration, shuffle=False, mode='eval', target=target if precomputed_mask is None else 'scene')
+        scene = Scene(dataset, gaussians, feature_gaussians, load_iteration=iteration, shuffle=False, mode='eval', target=target if target != 'xyz' and precomputed_mask is None else 'scene')
 
         if segment:
-            scene.save(scene.loaded_iter, target='scene_no_mask')
-            gaussians.segment(precomputed_mask)
-            scene.save(scene.loaded_iter, target='seg_no_mask')
+            if target == 'coarse_seg_everything':
+                mask = feature_gaussians.segment(idx=idx)
+                gaussians.segment(mask=mask)
+                scene.save(scene.loaded_iter, target=f'seg_res_{idx}')
+            else:
+                # if precomputed_mask is None:
+                #     gaussians.segment()
+                #     scene.save(scene.loaded_iter, target='seg_res')
+                # else:
+                # scene.save(scene.loaded_iter, target='scene_no_mask')
+                gaussians.segment(precomputed_mask)
+                # scene.save(scene.loaded_iter, target='seg_no_mask')
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         if 'feature' in target:
@@ -110,7 +127,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--segment", action="store_true")
-    parser.add_argument('--target', default='scene', const='scene', nargs='?', choices=['scene', 'seg', 'contrastive_feature'])
+    parser.add_argument('--target', default='scene', const='scene', nargs='?', choices=['scene', 'seg', 'feature', 'coarse_seg_everything', 'contrastive_feature', 'xyz'])
     parser.add_argument('--idx', default=0, type=int)
     parser.add_argument('--precomputed_mask', default=None, type=str)
 

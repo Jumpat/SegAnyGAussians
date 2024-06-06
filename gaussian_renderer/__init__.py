@@ -15,15 +15,13 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianR
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
-# import time
-
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, override_mask = None, filtered_mask = None):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, filtered_mask = None):
     """
     Render the scene. 
     
     Background tensor (bg_color) must be on GPU!
     """
-    # start_time  = time.time()
+ 
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
     screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
     try:
@@ -50,10 +48,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         debug=pipe.debug
     )
 
-    # print("Render time checker: raster_settings", time.time() - start_time)
-    # start_time  = time.time()
-
-
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
     means3D = pc.get_xyz
@@ -61,10 +55,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     opacity = pc.get_opacity
     if filtered_mask is not None:
         new_opacity = opacity.detach().clone()
-        new_opacity[filtered_mask, :] = -1.
+        new_opacity[filtered_mask, :] = 0
         opacity = new_opacity
-
-    mask = pc.get_mask if override_mask is None else override_mask
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
@@ -93,30 +85,25 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     else:
         colors_precomp = override_color
 
-    # print("Render time checker: prepare vars", time.time() - start_time)
-
-
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image, rendered_mask, radii = rasterizer(
+    rendered_image, radii = rasterizer(
         means3D = means3D,
         means2D = means2D,
         shs = shs,
         colors_precomp = colors_precomp,
         opacities = opacity,
-        mask = mask,
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
-    
-    # print("Render time checker: main render", time.time() - start_time)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
     return {"render": rendered_image,
-            "mask": rendered_mask,
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,
             "radii": radii}
+
+
 
 def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, precomputed_mask = None):
     """
@@ -162,6 +149,11 @@ def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
     opacity = pc.get_opacity
 
     mask = pc.get_mask if precomputed_mask is None else precomputed_mask
+    if len(mask.shape) == 1 or mask.shape[-1] == 1:
+        mask = mask.squeeze().unsqueeze(-1).repeat([1,3]).cuda()
+
+    shs = None
+    colors_precomp = mask
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
@@ -178,11 +170,12 @@ def render_mask(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
 
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_mask, radii = rasterizer.forward_mask(
+    rendered_mask, radii = rasterizer(
         means3D = means3D,
         means2D = means2D,
+        shs = shs,
+        colors_precomp = colors_precomp,
         opacities = opacity,
-        mask = mask,
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
@@ -203,7 +196,7 @@ from diff_gaussian_rasterization_contrastive_f import GaussianRasterizationSetti
 from diff_gaussian_rasterization_contrastive_f import GaussianRasterizer as GaussianRasterizerContrastiveF
 from scene.gaussian_model_ff import FeatureGaussianModel
 
-def render_contrastive_feature(viewpoint_camera, pc : FeatureGaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, nonlinear = None, override_color = None, filter_by_prob = -1, dropout = -1):
+def render_contrastive_feature(viewpoint_camera, pc : FeatureGaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, norm_point_features = False, smooth_type = None, smooth_weights = None, smooth_K = 16):
     """
     Render the scene. 
     
@@ -257,17 +250,38 @@ def render_contrastive_feature(viewpoint_camera, pc : FeatureGaussianModel, pipe
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
     shs = None
     colors_precomp = None
+    # if override_color is None:
+    #     if pipe.convert_SHs_python:
+    #         shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
+    #         dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.repeat(pc.get_features.shape[0], 1))
+    #         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+    #         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+    #         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+    #     else:
+    #         shs = pc.get_features
+    # else:
+    #     colors_precomp = override_color
 
-    colors_precomp = pc.get_point_features
-    if nonlinear:
-        colors_precomp = nonlinear(colors_precomp)
+    # if override_color is None:
+ 
+    #     shs = pc.get_features
+    # else:
+    #     colors_precomp = override_color
 
-    if dropout > 0:
-        rands = torch.rand(opacity.shape[0], device=opacity.device)
-        dropout_mask = rands < dropout
-        new_opacity = opacity.detach().clone()
-        new_opacity[dropout_mask, :] = 0
-        opacity = new_opacity
+    # colors_precomp = torch.cat([pc.get_point_features, pc.get_xyz], dim=1)
+
+    
+
+    if smooth_type is None:
+        colors_precomp = pc.get_point_features
+    elif smooth_type == 'multi_res':
+        colors_precomp = pc.get_multi_resolution_smoothed_point_features(smooth_weights = smooth_weights)
+    elif smooth_type == 'traditional':
+        colors_precomp = pc.get_smoothed_point_features(K = smooth_K, dropout=0.5)
+    
+    if norm_point_features:
+        colors_precomp = colors_precomp / (colors_precomp.norm(dim=1, keepdim=True) + 1e-9)
+    # colors_precomp = torch.nn.functional.normalize(colors_precomp, dim=1)
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, radii = rasterizer(
@@ -286,3 +300,4 @@ def render_contrastive_feature(viewpoint_camera, pc : FeatureGaussianModel, pipe
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,
             "radii": radii}
+

@@ -60,6 +60,7 @@ class ModelParams(ParamGroup):
 
         self.need_features = False
         self.need_masks = False
+        self.allow_principle_point_shift = False
 
         super().__init__(parser, "Loading Parameters", sentinel)
 
@@ -83,6 +84,7 @@ class OptimizationParams(ParamGroup):
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 30_000
         self.feature_lr = 0.0025
+        # self.feature_lr = 0.01
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
@@ -101,6 +103,13 @@ class OptimizationParams(ParamGroup):
         self.IoU_thresh = 0.5
         self.IoA_thresh = 0.8
         self.lamb = 0.3
+
+        # Training features
+        self.ray_sample_rate = 0
+        self.num_sampled_rays = -1
+        self.smooth_K = 16
+        self.scale_aware_dim = -1
+        self.rfn = 1.
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser, target_cfg_file = None):

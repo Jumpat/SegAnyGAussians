@@ -1,6 +1,6 @@
-# Differential Gaussian Rasterization with Contrastive Feature Field
+# Differential Gaussian Rasterization
 
-This rasterization code only modified the dimension of the rendering target. The original code is from [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/).
+Used as the rasterization engine for the paper "3D Gaussian Splatting for Real-Time Rendering of Radiance Fields". If you can make use of it in your own research, please be so kind to cite us.
 
 <section class="section" id="BibTeX">
   <div class="container is-max-desktop content">

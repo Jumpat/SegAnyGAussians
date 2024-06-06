@@ -1,3 +1,14 @@
+#
+# Copyright (C) 2023, Inria
+# GRAPHDECO research group, https://team.inria.fr/graphdeco
+# All rights reserved.
+#
+# This software is free for non-commercial, research and evaluation use 
+# under the terms of the LICENSE.md file.
+#
+# For inquiries contact  george.drettakis@inria.fr
+#
+
 import torch
 import pytorch3d.ops
 import numpy as np
@@ -87,6 +98,9 @@ class FeatureGaussianModel:
         self.max_sh_degree = 0
 
         self.feature_dim = feature_dim
+
+        self.feature_smooth_map = None
+        self.multi_res_feature_smooth_map = []
         
         self._xyz = torch.empty(0)
         # self._features_dc = torch.empty(0)
@@ -107,12 +121,20 @@ class FeatureGaussianModel:
         self.pe = None
         self.setup_functions()
 
+        self.old_xyz = []
+
+        self.old_point_features = []
+        self.old_opacity = []
+        self.old_scaling = []
+        self.old_rotation = []
+
+
     def change_to_segmentation_mode(self, training_args = None, target = 'coarse_seg_everything', fixed_feature = False):
         
         if target == 'coarse_seg_everything':
             self._point_features.data[:,:] = 0
         elif target == 'contrastive_feature':
-            self._point_features.data = torch.randn_like(self._point_features.data)
+            self._point_features.data = torch.randn_like(self._point_features.data) * 1e-2
 
             # output [N,27] pe 
             # emb_func, dim = get_embedder(4)
@@ -141,6 +163,8 @@ class FeatureGaussianModel:
                                                         lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                         lr_delay_mult=training_args.position_lr_delay_mult,
                                                         max_steps=training_args.position_lr_max_steps)
+                
+
             
             
     def change_to_multi_res_feature_mode(self, training_args = None):
@@ -223,20 +247,145 @@ class FeatureGaussianModel:
 
         print("Multi res idx mapper loaded.")
 
-    def segment(self, idx):
-        assert idx < self.get_point_features.shape[1] and idx >= 0
-        confidence = self.get_point_features[:, idx:idx+1]
-        return confidence > 0
+    # def segment(self, idx):
+        # assert idx < self.get_point_features.shape[1] and idx >= 0
+        # confidence = self.get_point_features[:, idx:idx+1]
+        # return confidence > 0
+
+
+    def segment(self, mask=None):
+        assert mask is not None and "Must input point cloud mask"
+
+        mask = mask.squeeze()
+        assert mask.shape[0] == self._xyz.shape[0]
+        if torch.count_nonzero(mask) == 0:
+            mask = ~mask
+            print("Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first.")
+
+        self.old_xyz.append(self._xyz)
+        self.old_point_features.append(self._point_features)
+        self.old_opacity.append(self._opacity)
+        self.old_scaling.append(self._scaling)
+        self.old_rotation.append(self._rotation)
+        
+        assert self.optimizer is None and "Please set optimizer to None"
+
+        self._xyz = self._xyz[mask]
+
+        self._opacity = self._opacity[mask]
+        self._scaling = self._scaling[mask]
+        self._rotation = self._rotation[mask]
+        self._point_features = self._point_features[mask]
+        
+    def roll_back(self):
+        try:
+            self._xyz = self.old_xyz.pop()
+            self._point_features = self.old_point_features.pop()
+            self._opacity = self.old_opacity.pop()
+            self._scaling = self.old_scaling.pop()
+            self._rotation = self.old_rotation.pop()
+        except:
+            # print("Roll back failed. Please run gaussians.segment() first.")
+            pass
+
+    @torch.no_grad()
+    def clear_segment(self):
+        try:
+            self._xyz = self.old_xyz[0]
+            self._point_features = self.old_point_features[0]
+            self._opacity = self.old_opacity[0]
+            self._scaling = self.old_scaling[0]
+            self._rotation = self.old_rotation[0]
+
+            self.old_xyz = []
+            self.old_point_features = []
+            self.old_opacity = []
+            self.old_scaling = []
+            self.old_rotation = []
+        except:
+            # print("Roll back failed. Please run gaussians.segment() first.")
+            pass
     
     @torch.no_grad()
-    def smooth_point_features(self, K = 16):
-        xyz = self.get_xyz
-        nearest_k_idx = pytorch3d.ops.knn_points(
-            xyz.unsqueeze(0),
-            xyz.unsqueeze(0),
-            K=K,
-        ).idx.squeeze()
-        self._point_features.data = self._point_features[nearest_k_idx, :].mean(dim = 1).detach()
+    def smooth_point_features(self, K = 16, smoothed_dim = 24):
+        if self.feature_smooth_map is None or self.feature_smooth_map["K"] != K:
+            xyz = self.get_xyz
+            nearest_k_idx = pytorch3d.ops.knn_points(
+                xyz.unsqueeze(0),
+                xyz.unsqueeze(0),
+                K=K,
+            ).idx.squeeze()
+            self.feature_smooth_map = {"K":K, "m":nearest_k_idx}
+
+        cur_features = self._point_features
+        cur_features[:, :smoothed_dim] = cur_features[self.feature_smooth_map["m"], :smoothed_dim].mean(dim = 1).detach()
+
+        self._point_features.data = cur_features
+    
+    def get_smoothed_point_features(self, K = 16, dropout = 0.5):
+        if K <= 1:
+            return self._point_features
+
+        assert dropout < 0 or int(K*dropout) >= 1
+
+        with torch.no_grad():
+            if self.feature_smooth_map is None or self.feature_smooth_map["K"] != K:
+                xyz = self.get_xyz
+                nearest_k_idx = pytorch3d.ops.knn_points(
+                    xyz.unsqueeze(0),
+                    xyz.unsqueeze(0),
+                    K=K,
+                ).idx.squeeze()
+                self.feature_smooth_map = {"K":K, "m":nearest_k_idx}
+
+        normed_features = torch.nn.functional.normalize(self._point_features, dim = -1, p = 2)
+
+        if dropout > 0 and dropout < 1:
+            select_point = torch.randperm(K)[ : int(K*dropout)]
+
+            select_idx = self.feature_smooth_map["m"][:, select_point]
+            ret = normed_features[select_idx, :].mean(dim = 1)
+        else:
+            ret = normed_features[self.feature_smooth_map["m"], :].mean(dim = 1)
+
+        return ret
+
+    def get_multi_resolution_smoothed_point_features(self, sample_rates = (0.1, 0.5, 1.5), Ks = (4,4,16), smooth_weights = None):
+        assert len(sample_rates) == len(Ks) and (smooth_weights is None or smooth_weights.shape[1] == len(Ks))
+        
+
+        if len(self.multi_res_feature_smooth_map) != len(sample_rates):
+            self.multi_res_feature_smooth_map = []
+
+        with torch.no_grad():
+            xyz = self.get_xyz
+            for i,(r,k) in enumerate(zip(sample_rates, Ks)):
+                if len(self.multi_res_feature_smooth_map) <= i or self.multi_res_feature_smooth_map[i]["rate"] != r or self.multi_res_feature_smooth_map[i]["K"] != k:
+
+                    pm = torch.rand(xyz.shape[0]) < r
+
+                    nearest_k_idx = pytorch3d.ops.knn_points(
+                        xyz.unsqueeze(0),
+                        xyz[pm].unsqueeze(0),
+                        K=k,
+                    ).idx.squeeze()
+
+                    if len(self.multi_res_feature_smooth_map) <= i:
+                        self.multi_res_feature_smooth_map.append({"rate":r, "K":k, "point_mask": pm, "m":nearest_k_idx})
+                    else:
+                        self.multi_res_feature_smooth_map[i] = {"rate":r, "K":k, "point_mask": pm, "m":nearest_k_idx}
+
+        normed_features = torch.nn.functional.normalize(self._point_features, dim = -1, p = 2)
+
+        # print(smooth_weights.mean(dim = 0))
+        ret = torch.zeros_like(normed_features)
+        for i, mrf in enumerate(self.multi_res_feature_smooth_map):
+            pm, idx = mrf["point_mask"], mrf["m"]
+            sw = smooth_weights[:, i:i+1] if smooth_weights is not None else 1
+            ret += sw * normed_features[pm][idx, :].mean(dim = 1)
+
+        return ret
+    
 
     def capture(self):
         return (
@@ -286,9 +435,15 @@ class FeatureGaussianModel:
     def get_xyz(self):
         return self._xyz
     
+    # @property
+    # def get_features(self):
+    #     features_dc = self._features_dc
+    #     features_rest = self._features_rest
+    #     return torch.cat((features_dc, features_rest), dim=1)
     @property
     def get_point_features(self):
         if self.multi_res_features is None or self.idx_mapper is None:
+            # return torch.cat([self._point_features, self._xyz], dim = 1)
             return self._point_features
         else:
             combined_feature = torch.cat([
@@ -315,11 +470,20 @@ class FeatureGaussianModel:
         self.spatial_lr_scale = spatial_lr_scale
 
         np_pcd_points = np.asarray(pcd.points)
+        # np_pcd_colors = np.asarray(pcd.colors)
         rands = np.random.rand(np_pcd_points.shape[0])
         selected = (rands < 0.05)
         np_pcd_points = np_pcd_points[selected]
+        # np_pcd_colors = np_pcd_colors[selected]
+        # print(np_pcd_points.shape, np_pcd_colors.shape)
 
+        # fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
+        # fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
         fused_point_cloud = torch.tensor(np_pcd_points).float().cuda()
+        # fused_color = RGB2SH(torch.tensor(np_pcd_colors).float().cuda())
+        # features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
+        # features[:, :3, 0 ] = fused_color
+        # features[:, 3:, 1:] = 0.0
         features = torch.zeros((fused_point_cloud.shape[0], self.feature_dim)).float().cuda()
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
@@ -333,6 +497,8 @@ class FeatureGaussianModel:
         opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
+        # self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
+        # self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
         self._point_features = nn.Parameter(features.contiguous().requires_grad_(True))
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
@@ -347,6 +513,7 @@ class FeatureGaussianModel:
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
             {'params': [self._point_features], 'lr': training_args.feature_lr, "name": "f"},
+            # {'params': [self._features_rest], 'lr': training_args.feature_lr / 20.0, "name": "f_rest"},
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"}
@@ -371,6 +538,8 @@ class FeatureGaussianModel:
         # All channels except the 3 DC
         for i in range(self.get_point_features.shape[1]):
             l.append('f_{}'.format(i))
+        # for i in range(self._features_rest.shape[1]*self._features_rest.shape[2]):
+        #     l.append('f_rest_{}'.format(i))
         l.append('opacity')
         for i in range(self._scaling.shape[1]):
             l.append('scale_{}'.format(i))
@@ -378,12 +547,22 @@ class FeatureGaussianModel:
             l.append('rot_{}'.format(i))
         return l
 
-    def save_ply(self, path):
+    @torch.no_grad()
+    def save_ply(self, path, smooth_weights = None, smooth_type = None, smooth_K = None):
         mkdir_p(os.path.dirname(path))
 
         xyz = self._xyz.detach().cpu().numpy()
         normals = np.zeros_like(xyz)
-        f = self.get_point_features.detach().contiguous().cpu().numpy()
+        # f_dc = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
+        # f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
+        # f = self.get_point_features.detach().contiguous().cpu().numpy()
+        if smooth_weights is not None:
+            f = self.get_multi_resolution_smoothed_point_features(smooth_weights = smooth_weights).detach().contiguous().cpu().numpy()
+        elif smooth_type is None:
+            f = self.get_point_features.detach().contiguous().cpu().numpy()
+        elif smooth_type == 'traditional':
+            f = self.get_smoothed_point_features(K=smooth_K, dropout=-1).detach().contiguous().cpu().numpy()
+        
         opacities = self._opacity.detach().cpu().numpy()
         scale = self._scaling.detach().cpu().numpy()
         rotation = self._rotation.detach().cpu().numpy()
@@ -413,6 +592,11 @@ class FeatureGaussianModel:
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
         opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
 
+        # features_dc = np.zeros((xyz.shape[0], 3, 1))
+        # features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        # features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+        # features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+
         f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_")]
         f_names = sorted(f_names, key = lambda x: int(x.split('_')[-1]))
         assert len(f_names)==self.feature_dim
@@ -420,6 +604,8 @@ class FeatureGaussianModel:
         features_extra = np.zeros((xyz.shape[0], len(f_names)))
         for idx, attr_name in enumerate(f_names):
             features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+        # features_extra = features_extra.reshape((features_extra.shape[0], self.feature_dim))
 
         scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
         scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
@@ -434,10 +620,14 @@ class FeatureGaussianModel:
             rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
         self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True))
+        # self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
+        # self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
         self._point_features = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").contiguous().requires_grad_(True))
         self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True))
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
+
+        # self.active_sh_degree = self.max_sh_degree
 
     def load_ply_from_3dgs(self, path):
         plydata = PlyData.read(path)
@@ -446,6 +636,13 @@ class FeatureGaussianModel:
                         np.asarray(plydata.elements[0]["y"]),
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
         opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+        # features_dc = np.zeros((xyz.shape[0], 3))
+        # features_dc[:, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        # features_dc[:, 1] = np.asarray(plydata.elements[0]["f_dc_1"])
+        # features_dc[:, 2] = np.asarray(plydata.elements[0]["f_dc_2"])
+        # fixed_features = np.concatenate([xyz, features_dc], axis=1)
+        # self._point_features = nn.Parameter(torch.tensor(fixed_features, dtype=torch.float, device="cuda").contiguous().requires_grad_(False))
 
         features = torch.zeros((xyz.shape[0], self.feature_dim)).float().cuda()
         self._point_features = nn.Parameter(features.contiguous().requires_grad_(True))
@@ -463,9 +660,14 @@ class FeatureGaussianModel:
             rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
         self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True))
+        # self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
+        # self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
+        # self._point_features = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").contiguous().requires_grad_(True))
         self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True))
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
+
+        # self.active_sh_degree = self.max_sh_degree
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -505,6 +707,8 @@ class FeatureGaussianModel:
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
 
         self._xyz = optimizable_tensors["xyz"]
+        # self._features_dc = optimizable_tensors["f_dc"]
+        # self._features_rest = optimizable_tensors["f_rest"]
         self._point_features = optimizable_tensors["f"]
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
@@ -539,6 +743,8 @@ class FeatureGaussianModel:
 
     def densification_postfix(self, new_xyz, new_point_features, new_opacities, new_scaling, new_rotation):
         d = {"xyz": new_xyz,
+        # "f_dc": new_features_dc,
+        # "f_rest": new_features_rest,
         'f': new_point_features,
         "opacity": new_opacities,
         "scaling" : new_scaling,
@@ -547,6 +753,7 @@ class FeatureGaussianModel:
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
         self._xyz = optimizable_tensors["xyz"]
         self._point_features = optimizable_tensors["f"]
+        # self._features_rest = optimizable_tensors["f_rest"]
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
@@ -572,6 +779,8 @@ class FeatureGaussianModel:
         new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N))
         new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
         new_point_features = self._point_features[selected_pts_mask].repeat(N,1)
+        # new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
+        # new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
         new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
 
         self.densification_postfix(new_xyz, new_point_features, new_opacity, new_scaling, new_rotation)
@@ -586,6 +795,8 @@ class FeatureGaussianModel:
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
         
         new_xyz = self._xyz[selected_pts_mask]
+        # new_features_dc = self._features_dc[selected_pts_mask]
+        # new_features_rest = self._features_rest[selected_pts_mask]
         new_point_features = self._point_features[selected_pts_mask]
         new_opacities = self._opacity[selected_pts_mask]
         new_scaling = self._scaling[selected_pts_mask]

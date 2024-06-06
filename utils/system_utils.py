@@ -23,12 +23,10 @@ def mkdir_p(folder_path):
         else:
             raise
 
-# Old version
 # def searchForMaxIteration(folder):
 #     saved_iters = [int(fname.split("_")[-1]) for fname in os.listdir(folder)]
 #     return max(saved_iters)
 
-# Modified version for SAGA
 # target: feature, seg, scene
 def searchForMaxIteration(folder, target = "scene"):
     fnames = os.listdir(folder)

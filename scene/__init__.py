@@ -61,7 +61,7 @@ class Scene:
                         self.loaded_iter = searchForMaxIteration(os.path.join(self.model_path, "point_cloud"), target="scene")
                     elif target in ['feature', 'contrastive_feature']:
                         self.feature_loaded_iter = searchForMaxIteration(os.path.join(self.model_path, "point_cloud"), target=target) if (feature_load_iteration is None or feature_load_iteration == -1) else feature_load_iteration
-                        self.loaded_iter = -1
+                        self.loaded_iter = -1 if gaussians is None else searchForMaxIteration(os.path.join(self.model_path, "point_cloud"), target='scene')
                     elif target == 'coarse_seg_everything':
                         self.feature_loaded_iter = searchForMaxIteration(os.path.join(self.model_path, "point_cloud"), target=target)
                         self.loaded_iter = searchForMaxIteration(os.path.join(self.model_path, "point_cloud"), target="scene")
@@ -95,10 +95,16 @@ class Scene:
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, need_features = args.need_features, need_masks = args.need_masks, sample_rate = sample_rate)
+        # used for testing lerf transforms,json
+        # and not os.path.exists(os.path.join(args.source_path, "transforms.json")):
+            print(f"Allow Camera Principle Point Shift: {args.allow_principle_point_shift}")
+            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, need_features = args.need_features, need_masks = args.need_masks, sample_rate = sample_rate, allow_principle_point_shift = args.allow_principle_point_shift, replica = 'replica' in args.model_path)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
+        # elif os.path.exists(os.path.join(args.source_path, "transforms.json")):
+        #     print("Found transforms.json file, assuming Lerf data set!")
+        #     scene_info = sceneLoadTypeCallbacks["Lerf"](args.source_path, args.white_background, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -141,11 +147,17 @@ class Scene:
                                                             "point_cloud",
                                                             "iteration_" + str(self.loaded_iter),
                                                             "scene_point_cloud.ply"))
-                else:
+                elif 'feature' not in target:
                     self.gaussians.load_ply(os.path.join(self.model_path,
                                                             "point_cloud",
                                                             "iteration_" + str(self.loaded_iter),
                                                             target+"_point_cloud.ply"))
+                else:
+                    self.gaussians.load_ply(os.path.join(self.model_path,
+                                                            "point_cloud",
+                                                            "iteration_" + str(self.loaded_iter),
+                                                            "scene_point_cloud.ply"))
+
         elif self.gaussians is not None:
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 
@@ -219,10 +231,11 @@ class Scene:
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_mask(os.path.join(point_cloud_path, f"seg_point_cloud_{id}.npy"))
 
-    def save_feature(self, iteration, target = 'coarse_seg_everything'):
+    def save_feature(self, iteration, target = 'coarse_seg_everything', smooth_weights = None, smooth_type = None, smooth_K = 16):
         assert self.feature_gaussians is not None and (target == 'feature' or target == 'coarse_seg_everything' or target == 'contrastive_feature')
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
-        self.feature_gaussians.save_ply(os.path.join(point_cloud_path, f"{target}_point_cloud.ply"))
+        self.feature_gaussians.save_ply(os.path.join(point_cloud_path, f"{target}_point_cloud.ply"), smooth_weights, smooth_type, smooth_K)
+
 
     # def save_coarse_seg_everything(self, iteration):
     #     assert self.feature_gaussians is not None

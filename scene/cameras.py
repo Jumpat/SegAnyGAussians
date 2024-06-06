@@ -16,7 +16,7 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix
 
 class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
-                 image_name, uid, features = None, masks = None,
+                 image_name, uid, cx = None, cy = None, features = None, masks = None, mask_scales = None,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
                  ):
         super(Camera, self).__init__()
@@ -42,9 +42,10 @@ class Camera(nn.Module):
 
         self.original_features = features
         self.original_masks = masks
+        self.mask_scales = mask_scales
 
         # a dirty hack to make sure that the feature width is always 200
-        self.feature_width = 200
+        self.feature_width = 100
         self.feature_height = int(self.feature_width * self.image_height / self.image_width)
 
         if gt_alpha_mask is not None:
@@ -59,7 +60,7 @@ class Camera(nn.Module):
         self.scale = scale
 
         self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
-        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy, cx=cx, cy=cy, w=self.image_width, h=self.image_height).transpose(0,1).cuda()
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
 

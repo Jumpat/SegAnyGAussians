@@ -59,6 +59,15 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
+        self.old_xyz = []
+        self.old_mask = []
+
+        self.old_features_dc = []
+        self.old_features_rest = []
+        self.old_opacity = []
+        self.old_scaling = []
+        self.old_rotation = []
+
     def capture(self):
         return (
             self.active_sh_degree,
@@ -221,6 +230,31 @@ class GaussianModel:
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
 
+    # def save_ply(self, path):
+    #     mkdir_p(os.path.dirname(path))
+
+    #     xyz = self._xyz.detach().cpu().numpy()
+    #     normals = np.zeros_like(xyz)
+    #     f_dc = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
+    #     f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
+    #     opacities = self._opacity.detach().cpu().numpy()
+    #     scale = self._scaling.detach().cpu().numpy()
+    #     rotation = self._rotation.detach().cpu().numpy()
+
+    #     dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
+    #     # edit
+    #     add_color = True
+    #     if add_color:
+    #         dtype_full[3], dtype_full[4], dtype_full[5] = ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')
+    #         rgbs = SH2RGB(f_dc)
+    #         normals = (np.clip(rgbs, 0.0, 1.0) * 255).astype(np.uint8)
+            
+    #     elements = np.empty(xyz.shape[0], dtype=dtype_full)
+    #     attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
+    #     elements[:] = list(map(tuple, attributes))
+    #     el = PlyElement.describe(elements, 'vertex')
+    #     PlyData([el]).write(path)
+
     def save_mask(self, path):
         mkdir_p(os.path.dirname(path))
         mask = self._mask.detach().cpu().numpy()        
@@ -332,14 +366,25 @@ class GaussianModel:
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
 
+    @torch.no_grad()
     def segment(self, mask=None):
         if mask is None:
             mask = (self._mask > 0)
         mask = mask.squeeze()
+        assert mask.shape[0] == self._xyz.shape[0]
         if torch.count_nonzero(mask) == 0:
             mask = ~mask
             print("Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first.")
 
+        self.old_xyz.append(self._xyz)
+        self.old_mask.append(self._mask)
+
+        self.old_features_dc.append(self._features_dc)
+        self.old_features_rest.append(self._features_rest)
+        self.old_opacity.append(self._opacity)
+        self.old_scaling.append(self._scaling)
+        self.old_rotation.append(self._rotation)
+        
         if self.optimizer is None:
             self._xyz = self._xyz[mask]
             self._mask = self._mask[mask]
@@ -349,6 +394,7 @@ class GaussianModel:
             self._opacity = self._opacity[mask]
             self._scaling = self._scaling[mask]
             self._rotation = self._rotation[mask]
+
         else:
             optimizable_tensors = self._prune_optimizer(mask)
 
@@ -366,6 +412,42 @@ class GaussianModel:
 
             self.denom = self.denom[mask]
         
+    def roll_back(self):
+        try:
+            self._xyz = self.old_xyz.pop()
+            self._mask = self.old_mask.pop()
+
+            self._features_dc = self.old_features_dc.pop()
+            self._features_rest = self.old_features_rest.pop()
+            self._opacity = self.old_opacity.pop()
+            self._scaling = self.old_scaling.pop()
+            self._rotation = self.old_rotation.pop()
+        except:
+            pass
+    
+    @torch.no_grad()
+    def clear_segment(self):
+        try:
+            self._xyz = self.old_xyz[0]
+            self._mask = self.old_mask[0]
+
+            self._features_dc = self.old_features_dc[0]
+            self._features_rest = self.old_features_rest[0]
+            self._opacity = self.old_opacity[0]
+            self._scaling = self.old_scaling[0]
+            self._rotation = self.old_rotation[0]
+
+            self.old_xyz = []
+            self.old_mask = []
+
+            self.old_features_dc = []
+            self.old_features_rest = []
+            self.old_opacity = []
+            self.old_scaling = []
+            self.old_rotation = []
+        except:
+            # print("Roll back failed. Please run gaussians.segment() first.")
+            pass
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
