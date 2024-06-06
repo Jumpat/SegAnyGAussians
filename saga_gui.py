@@ -365,12 +365,13 @@ class GaussianSplattingGUI:
             dpg.add_checkbox(label="multi-clickmode", callback=clickmode_multi_callback, user_data="Some Data")
             dpg.add_checkbox(label="preview_segmentation_in_2d", callback=preview_callback, user_data="Some Data")
             
-            dpg.add_text("\n", tag="hold1")
+            dpg.add_text("\n")
             dpg.add_button(label="segment3d", callback=callback_segment3d, user_data="Some Data")
             dpg.add_button(label="roll_back", callback=roll_back, user_data="Some Data")
             dpg.add_button(label="clear", callback=clear_edit, user_data="Some Data")
-            dpg.add_input_text("save as", default_value="precomputed_mask", tag="save_name")
-            dpg.add_button(label="save", callback=callback_save, user_data="Some Data")
+            dpg.add_button(label="save as", callback=callback_save, user_data="Some Data")
+            dpg.add_input_text(label="", default_value="precomputed_mask", tag="save_name")
+            dpg.add_text("\n")
 
             dpg.add_button(label="cluster3d", callback=callback_cluster, user_data="Some Data")
             dpg.add_button(label="reshuffle_cluster_color", callback=callback_reshuffle_color, user_data="Some Data")
@@ -686,11 +687,15 @@ class GaussianSplattingGUI:
                 self.engine['scene'].segment(self.score_pts_binary)
                 self.engine['feature'].segment(self.score_pts_binary)
 
-            if self.save_flag:
-                self.save_flag = False
+        if self.save_flag:
+            print("Saving ...")
+            self.save_flag = False
+            try:
                 os.makedirs("./segmentation_res", exist_ok=True)
                 torch.save(self.score_pts_binary, f"./segmentation_res/{dpg.get_value('save_name')}.pt")
-                
+            except:
+                with dpg.window(label="Tips"):
+                    dpg.add_text('You should segment the 3D object before save it (click segment3d first).')
 
         self.render_buffer = None
         render_num = 0
@@ -717,10 +722,6 @@ class GaussianSplattingGUI:
             render_num += 1
         self.render_buffer /= render_num
 
-
-
-            
-        
         dpg.set_value("_texture", self.render_buffer)
 
 
