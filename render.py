@@ -14,7 +14,7 @@ from scene import Scene, GaussianModel, FeatureGaussianModel
 import os
 from tqdm import tqdm
 from os import makedirs
-from gaussian_renderer import render, render_contrastive_feature
+from gaussian_renderer import render, render_contrastive_feature, render_mask
 import torchvision
 
 from utils.general_utils import safe_state
@@ -40,24 +40,23 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         render_func = render
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        if precomputed_mask is not None:
-            res = render_func(view, gaussians, pipeline, background, override_mask=precomputed_mask.float())
-        else:
-            res = render_func(view, gaussians, pipeline, background)
-        rendering = res["render"]
-        
-        gt = view.original_image[0:3, :, :]
-        # print(rendering.shape, mask.shape, gt.shape, "rendering.shape, mask.shape, gt.shape")
 
-        # print("mask render time", time.time() - start_time)
+        res = render_func(view, gaussians, pipeline, background)
+
+        if target == 'seg':
+            assert precomputed_mask is not None and 'Rendering 2D segmentation mask requires a precomputed mask.'
+            mask_res = render_mask(view, gaussians, pipeline, background, precomputed_mask=precomputed_mask)
+
+        rendering = res["render"]
+        gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
         if target == 'seg':
-            mask = res["mask"]
+            mask = mask_res["mask"]
             mask[mask < 0.5] = 0
             mask[mask != 0] = 1
             mask = mask[0, :, :]
             torchvision.utils.save_image(mask, os.path.join(mask_path, '{0:05d}'.format(idx) + ".png"))
-        if target == 'seg' or target == 'scene' or target == 'coarse_seg_everything':
+        if target == 'seg' or target == 'scene':
             torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         elif 'feature' in target:
             torch.save(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".pt"))
@@ -91,18 +90,7 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
         scene = Scene(dataset, gaussians, feature_gaussians, load_iteration=iteration, shuffle=False, mode='eval', target=target if target != 'xyz' and precomputed_mask is None else 'scene')
 
         if segment:
-            if target == 'coarse_seg_everything':
-                mask = feature_gaussians.segment(idx=idx)
-                gaussians.segment(mask=mask)
-                scene.save(scene.loaded_iter, target=f'seg_res_{idx}')
-            else:
-                # if precomputed_mask is None:
-                #     gaussians.segment()
-                #     scene.save(scene.loaded_iter, target='seg_res')
-                # else:
-                # scene.save(scene.loaded_iter, target='scene_no_mask')
-                gaussians.segment(precomputed_mask)
-                # scene.save(scene.loaded_iter, target='seg_no_mask')
+            gaussians.segment(precomputed_mask)
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         if 'feature' in target:
