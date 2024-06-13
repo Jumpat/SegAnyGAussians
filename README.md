@@ -89,9 +89,44 @@ python saga_gui.py --model_path <path to the pre-trained 3DGS model>
 ```
 Temporarily, open-vocabulary segmentation is only implemented in the jupyter notebook. Please refer to prompt_segmenting.ipynb for detailed instructions.
 
+## GUI Usage:
+After set up the GUI, you can see the following interface:
+
+<div align=center>
+<img src="./assets/GUI-show.png" width="600px">
+</div>
+
+### Motion Control:
+- ``left drag``: Rotate.
+- ``mid drag``: Pan.
+- ``right click``: Input point prompt(s) (need to check the segmentation mode first).
+
+### Segmentation Control:
+
+#### Hyper-parameter option:
+- ``scale``: The 3D scale (used for both segmentation and clustering).
+- ``score thresh``: The segmentation similarity threshold (used for segmentation).
+#### Render option: 
+
+- ``RGB``: Show the original RGB of current 3D-GS model at the specific viewpoint.
+- ``PCA``: Show the PCA decomposition results of 3D features of current 3D-GS model at the specific viewpoint.
+- ``SIMILARITY``: Show the similarity map of given point prompts (need to input prompts first).
+- ``3D CLUSTER``: Show the 3D clustering results of current 3D-GS model.
+
+#### Segmentation Mode option:
+- ``click mode``: Only one point can be input in this mode.
+- ``multi-click mode``: Multiple points can be input in this mode to select many objects simultaneously.
+- ``preview_segmentation_in_2d``: Show the 2D segmentation results with current input prompts (points, scale and score thresh). Note that the 2D segmentation results may be inconsistent with the 3D results.
+
+#### Segmentation option:
+After selecting the interest target(s). You can click ``segment3D`` to get the 3D segmentation results. If the results is not satisfied, you can click ``roll back`` to undo this segmentation or click ``clear`` to roll back to the unsegmented status. Otherwise, you can click ``save as`` to save the segmentation results in ``./segmentation_res/your_name.pt``, which is a binary mask for all 3D Gaussians in the 3D-GS model.
+
+#### Clustering option:
+At any time, you can click ``cluster3d`` to get the clustering results of the current 3D-GS model. For example, you can directly cluster across the whole scene or cluster in the temporarily segmented objects for decomposition. Click ``reshuffle_cluster_color`` to shuffle the rendering colors of the clusters.
+>Note that directly clustering the whole scene may take a while, since we use HDBSCAN without the GPU support for convenience.
 
 ## Rendering
-After saving segmentation results in the interactive GUI or running the scripts in prompt_segmenting.ipynb, the bitmap of the Gaussians will be saved in ./segmentation_res/\<name>.pt (you can set the name by yourself). To render the segmentation results on training views (get the segmented object by removing the background), run the following command:
+After saving segmentation results in the interactive GUI or running the scripts in prompt_segmenting.ipynb, the bitmap of the Gaussians will be saved in ``./segmentation_res/your_name.pt`` (you can set the name by yourself). To render the segmentation results on training views (get the segmented object by removing the background), run the following command:
 ```bash
 python render.py -m <path to the pre-trained 3DGS model> --precomputed_mask <path to the segmentation results> --target scene --segment
 ```
