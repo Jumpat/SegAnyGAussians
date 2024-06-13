@@ -119,7 +119,7 @@ After set up the GUI, you can see the following interface:
 - ``preview_segmentation_in_2d``: Show the 2D segmentation results with current input prompts (points, scale and score thresh). Note that the 2D segmentation results may be inconsistent with the 3D results.
 
 #### Segmentation option:
-After selecting the interest target(s). You can click ``segment3D`` to get the 3D segmentation results. If the results is not satisfied, you can click ``roll back`` to undo this segmentation or click ``clear`` to roll back to the unsegmented status. Otherwise, you can click ``save as`` to save the segmentation results in ``./segmentation_res/your_name.pt``, which is a binary mask for all 3D Gaussians in the 3D-GS model.
+After selecting the interest target(s). You can click ``segment3D`` to get the 3D segmentation results. If the results is not satisfied, you can click ``roll back`` to undo this segmentation or click ``clear`` to roll back to the unsegmented status, or you can continue to input prompts to conduct segmentation based on the temporary segmentation result. You can click ``save as`` to save the current segmentation results in ``./segmentation_res/your_name.pt``, which is a binary mask for all 3D Gaussians in the 3D-GS model.
 
 #### Clustering option:
 At any time, you can click ``cluster3d`` to get the clustering results of the current 3D-GS model. For example, you can directly cluster across the whole scene or cluster in the temporarily segmented objects for decomposition. Click ``reshuffle_cluster_color`` to shuffle the rendering colors of the clusters.
