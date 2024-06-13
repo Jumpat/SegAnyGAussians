@@ -692,7 +692,8 @@ class GaussianSplattingGUI:
             self.save_flag = False
             try:
                 os.makedirs("./segmentation_res", exist_ok=True)
-                torch.save(self.score_pts_binary, f"./segmentation_res/{dpg.get_value('save_name')}.pt")
+                save_mask = self.engine['scene']._mask == self.engine['scene'].segment_times + 1
+                torch.save(save_mask, f"./segmentation_res/{dpg.get_value('save_name')}.pt")
             except:
                 with dpg.window(label="Tips"):
                     dpg.add_text('You should segment the 3D object before save it (click segment3d first).')

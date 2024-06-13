@@ -151,7 +151,7 @@ class GaussianModel:
         scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
-        mask = torch.zeros((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
+        mask = torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda")
 
         opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
@@ -163,7 +163,9 @@ class GaussianModel:
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
-        self._mask = nn.Parameter(mask.requires_grad_(True))
+        # self._mask = nn.Parameter(mask.requires_grad_(True))
+        self.segment_times = 0
+        self._mask = torch.ones((self._xyz.shape[0],), dtype=torch.float, device="cuda")
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
@@ -173,7 +175,7 @@ class GaussianModel:
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
 
-            {'params': [self._mask], 'lr': training_args.mask_lr, "name": "mask"},
+            # {'params': [self._mask], 'lr': training_args.mask_lr, "name": "mask"},
 
             {'params': [self._features_dc], 'lr': training_args.feature_lr, "name": "f_dc"},
             {'params': [self._features_rest], 'lr': training_args.feature_lr / 20.0, "name": "f_rest"},
@@ -272,7 +274,7 @@ class GaussianModel:
                         np.asarray(plydata.elements[0]["y"]),
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
         
-        mask = np.asarray(plydata.elements[0]["mask"])[..., np.newaxis]
+        # mask = np.asarray(plydata.elements[0]["mask"])[..., np.newaxis]
 
         opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
 
@@ -304,7 +306,7 @@ class GaussianModel:
 
         self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True))
 
-        self._mask = nn.Parameter(torch.tensor(mask, dtype=torch.float, device="cuda").requires_grad_(True))
+        # self._mask = nn.Parameter(torch.tensor(mask, dtype=torch.float, device="cuda").requires_grad_(True))
 
         self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
@@ -313,6 +315,9 @@ class GaussianModel:
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
 
         self.active_sh_degree = self.max_sh_degree
+
+        self.segment_times = 0
+        self._mask = torch.ones((self._xyz.shape[0],), dtype=torch.float, device="cuda")
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -353,7 +358,7 @@ class GaussianModel:
 
         self._xyz = optimizable_tensors["xyz"]
 
-        self._mask = optimizable_tensors["mask"]
+        # self._mask = optimizable_tensors["mask"]
 
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
@@ -368,10 +373,10 @@ class GaussianModel:
 
     @torch.no_grad()
     def segment(self, mask=None):
-        if mask is None:
-            mask = (self._mask > 0)
+        assert mask is not None
+            # mask = (self._mask > 0)
         mask = mask.squeeze()
-        assert mask.shape[0] == self._xyz.shape[0]
+        # assert mask.shape[0] == self._xyz.shape[0]
         if torch.count_nonzero(mask) == 0:
             mask = ~mask
             print("Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first.")
@@ -387,7 +392,7 @@ class GaussianModel:
         
         if self.optimizer is None:
             self._xyz = self._xyz[mask]
-            self._mask = self._mask[mask]
+            # self._mask = self._mask[mask]
 
             self._features_dc = self._features_dc[mask]
             self._features_rest = self._features_rest[mask]
@@ -400,7 +405,7 @@ class GaussianModel:
 
             self._xyz = optimizable_tensors["xyz"]
 
-            self._mask = optimizable_tensors["mask"]
+            # self._mask = optimizable_tensors["mask"]
 
             self._features_dc = optimizable_tensors["f_dc"]
             self._features_rest = optimizable_tensors["f_rest"]
@@ -411,17 +416,30 @@ class GaussianModel:
             self.xyz_gradient_accum = self.xyz_gradient_accum[mask]
 
             self.denom = self.denom[mask]
+
+        # print(self.segment_times, torch.unique(self._mask))
+        self.segment_times += 1
+        tmp = self._mask[self._mask == self.segment_times]
+        tmp[mask] += 1
+        self._mask[self._mask == self.segment_times] = tmp
+
+        # print(self._mask[self._mask == self.segment_times][mask].shape)
+        # print(self.segment_times, torch.unique(self._mask), torch.unique(mask))
         
     def roll_back(self):
         try:
             self._xyz = self.old_xyz.pop()
-            self._mask = self.old_mask.pop()
+            # self._mask = self.old_mask.pop()
 
             self._features_dc = self.old_features_dc.pop()
             self._features_rest = self.old_features_rest.pop()
             self._opacity = self.old_opacity.pop()
             self._scaling = self.old_scaling.pop()
             self._rotation = self.old_rotation.pop()
+
+            
+            self._mask[self._mask == self.segment_times+1] -= 1
+            self.segment_times -= 1
         except:
             pass
     
@@ -429,7 +447,7 @@ class GaussianModel:
     def clear_segment(self):
         try:
             self._xyz = self.old_xyz[0]
-            self._mask = self.old_mask[0]
+            # self._mask = self.old_mask[0]
 
             self._features_dc = self.old_features_dc[0]
             self._features_rest = self.old_features_rest[0]
@@ -445,6 +463,9 @@ class GaussianModel:
             self.old_opacity = []
             self.old_scaling = []
             self.old_rotation = []
+
+            self.segment_times = 0
+            self._mask = torch.ones((self._xyz.shape[0],), dtype=torch.float, device="cuda")
         except:
             # print("Roll back failed. Please run gaussians.segment() first.")
             pass

@@ -103,6 +103,7 @@ class FeatureGaussianModel:
         self.multi_res_feature_smooth_map = []
         
         self._xyz = torch.empty(0)
+        self._mask = torch.empty(0)
         # self._features_dc = torch.empty(0)
         # self._features_rest = torch.empty(0)
         self._point_features = torch.empty(0)
@@ -255,12 +256,13 @@ class FeatureGaussianModel:
 
     def segment(self, mask=None):
         assert mask is not None and "Must input point cloud mask"
-
         mask = mask.squeeze()
         assert mask.shape[0] == self._xyz.shape[0]
         if torch.count_nonzero(mask) == 0:
             mask = ~mask
             print("Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first.")
+
+        
 
         self.old_xyz.append(self._xyz)
         self.old_point_features.append(self._point_features)
@@ -276,6 +278,11 @@ class FeatureGaussianModel:
         self._scaling = self._scaling[mask]
         self._rotation = self._rotation[mask]
         self._point_features = self._point_features[mask]
+
+        self.segment_times += 1
+        tmp = self._mask[self._mask == self.segment_times]
+        tmp[mask] += 1
+        self._mask[self._mask == self.segment_times] = tmp
         
     def roll_back(self):
         try:
@@ -284,6 +291,9 @@ class FeatureGaussianModel:
             self._opacity = self.old_opacity.pop()
             self._scaling = self.old_scaling.pop()
             self._rotation = self.old_rotation.pop()
+            
+            self._mask[self._mask == self.segment_times+1] -= 1
+            self.segment_times -= 1
         except:
             # print("Roll back failed. Please run gaussians.segment() first.")
             pass
@@ -302,6 +312,9 @@ class FeatureGaussianModel:
             self.old_opacity = []
             self.old_scaling = []
             self.old_rotation = []
+
+            self.segment_times = 0
+            self._mask = torch.ones((self._xyz.shape[0],), dtype=torch.float, device="cuda")
         except:
             # print("Roll back failed. Please run gaussians.segment() first.")
             pass
@@ -497,6 +510,7 @@ class FeatureGaussianModel:
         opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
+        self._mask = torch.ones((fused_point_cloud.shape[0],), dtype=torch.float, device="cuda")
         # self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
         # self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
         self._point_features = nn.Parameter(features.contiguous().requires_grad_(True))
@@ -504,6 +518,8 @@ class FeatureGaussianModel:
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+
+        self.segment_times = 0
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
@@ -628,6 +644,8 @@ class FeatureGaussianModel:
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
 
         # self.active_sh_degree = self.max_sh_degree
+        self.segment_times = 0
+        self._mask = torch.ones((self._xyz.shape[0],), dtype=torch.float, device="cuda")
 
     def load_ply_from_3dgs(self, path):
         plydata = PlyData.read(path)
