@@ -504,7 +504,7 @@ class GaussianModel:
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
         self._xyz = optimizable_tensors["xyz"]
 
-        self._mask = optimizable_tensors["mask"]
+        # self._mask = optimizable_tensors["mask"]
 
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
