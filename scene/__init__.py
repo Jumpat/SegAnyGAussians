@@ -225,7 +225,7 @@ class Scene:
     def save(self, iteration, target='scene'):
         assert target != 'feature' and "Please use save_feature() to save feature gaussians!"
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
-        self.gaussians.save_ply(os.path.join(point_cloud_path, target+"_point_cloud.ply"), has_mask='no_mask' not in target)
+        self.gaussians.save_ply(os.path.join(point_cloud_path, target+"_point_cloud.ply"))
 
     def save_mask(self, iteration, id = 0):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
