@@ -90,13 +90,13 @@ python saga_gui.py --model_path <path to the pre-trained 3DGS model>
 Temporarily, open-vocabulary segmentation is only implemented in the jupyter notebook. Please refer to prompt_segmenting.ipynb for detailed instructions.
 
 ## GUI Usage:
-After set up the GUI, you can see the following interface:
+After setting up the GUI, you can see the following interface:
 
 <div align=center>
 <img src="./assets/GUI-show.png" width="600px">
 </div>
 
-### Motion Control:
+### Viewpoint Control:
 - ``left drag``: Rotate.
 - ``mid drag``: Pan.
 - ``right click``: Input point prompt(s) (need to check the segmentation mode first).
