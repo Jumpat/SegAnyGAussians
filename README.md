@@ -1,5 +1,5 @@
 # SAGA
-> Note: This repository is still under construction.
+> Note: Please refer to the v2 branch for the newest version of SAGA.
 
 The official implementation of SAGA (Segment Any 3D GAussians). The paper is at [this url](https://jumpat.github.io/SAGA/SAGA_paper.pdf). Please refer to our [project page](https://jumpat.github.io/SAGA/) for more information. 
 <br>
