@@ -1,4 +1,4 @@
-# SAGA
+# SAGA (AAAI 25)
 
 The official implementation of [SAGA (Segment Any 3D GAussians)](https://arxiv.org/abs/2312.00860). 
 <!-- Please refer to our [project page](https://jumpat.github.io/SAGA/) for more information.  -->
