@@ -16,6 +16,7 @@
 #include "simple_knn.h"
 #include <cub/cub.cuh>
 #include <cub/device/device_radix_sort.cuh>
+#include <cfloat>
 #include <vector>
 #include <cuda_runtime_api.h>
 #include <thrust/device_vector.h>
